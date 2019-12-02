@@ -1,0 +1,197 @@
+<!DOCTYPE HTML>
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script
+            src="https://cdn.jsdelivr.net/npm/lodash@4.17.15/lodash.min.js"
+            integrity="sha256-VeNaFBVDhoX3H+gJ37DpT/nTuZTdjYro9yBruHjVmoQ="
+            crossorigin="anonymous"
+    ></script>
+    <script
+            src="https://code.jquery.com/jquery-3.4.1.min.js"
+            integrity="sha256-CSXorXvZcTkaix6Yvo6HppcZGetbYMGWSFlBw8HfCJo="
+            crossorigin="anonymous"
+    ></script>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700|Material+Icons">
+    <!-- CSS -->
+    <link
+            rel="stylesheet"
+            href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css"
+    />
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" href="images/favicon.png" />
+    <script src="https://ajax.googleapis.com/ajax/libs/angularjs/1.6.5/angular.min.js"></script>
+    <!-- Controller -->
+    <script>
+        const token = "5f9e4060-0d61-4698-882b-4ee6bd5d1de4";
+        const localDev = (window.location.port === '63342');
+        const baseUrl =  localDev ? "http://localhost:8080" : "..";
+        var headers = {};
+        if (localDev) headers = { 'Authorization': 'Bearer ' + token };
+        table_headers = ['Period', 'Organisation unit', 'Data element', 'Value', 'Source type', 'Last updated', 'Author'];
+        function createAPICall(params) {
+            response = {};
+            switch (params['endpoint']) {
+                case 'analytics':
+                    response = {
+                        'url_suffix': '/api/analytics',
+                        'params': [
+                            'dimension=co',
+                            'dimension=pe:' + params['pe'],
+                            'dimension=ou:' + params['ou'],
+                            'dimension=dx:' + params['dx'].join(';'),
+                            'displayProperty=SHORTNAME',
+                            'includeMetadataDetails=true'
+                        ]
+                    };
+                    break;
+                case 'reportTable':
+                    response = {
+                        'url_suffix': '/api/reportTables/' + params['id'] + '.json',
+                    };
+                    break;
+                case 'reportTablesList':
+                    response = {
+                        'url_suffix': '/api/reportTables.json',
+                        'params': [
+                            'fields:id,displayName,lastUpdated,title',
+                            'order=lastUpdated:desc',
+                            'paging=false'
+                        ]
+                    };
+                    break;
+            }
+            return response
+        }
+        function fillPivotTableSelect(tables_list) {
+            tables_list.forEach(function(table, index) {
+                ptSelect = document.getElementById("pivotTableSelect");
+                ptSelect.options.add(new Option(table['displayName'], table['id']));
+            })
+        }
+        function extractTableContent(rawData) {
+            extractData = []
+            rowsLookup = {};
+            rawData.rows.forEach(function(row) {
+                (rowsLookup[row[0]+row[2]+row[3]] || (rowsLookup[row[0]+row[2]+row[3]] = [])).push(row)
+            });
+            for (index = 0; index < rawData.metaData.dimensions.dx.length; index += 2) {
+                dataElementId = rawData.metaData.dimensions.dx[index];
+                sourceTypeId = rawData.metaData.dimensions.dx[index + 1];
+                rawData.metaData.dimensions.pe.forEach(function (period) {
+                    rawData.metaData.dimensions.ou.forEach(function (ou) {
+                        newRow = {};
+                        newRow.period = rawData.metaData.items[period];
+                        newRow.organisationUnit = rawData.metaData.items[ou];
+                        newRow.dataElement = rawData.metaData.items[dataElementId];
+                        newRow.value = rowsLookup[dataElementId + period + ou][0][4];
+                        newRow.sourceTypes = rowsLookup[sourceTypeId + period + ou].map(i => rawData.metaData.items[i[1]]);
+                        extractData.push(newRow)
+                    });
+                });
+            }
+            return extractData;
+
+        }
+        function insertCellToTable(newRow, newvalue){
+            newCell = newRow.insertCell();
+            content = document.createTextNode(newvalue);
+            newCell.appendChild(content);
+        }
+        function loadTableInfo(selectElement) {
+            api_params = createAPICall({'endpoint': 'reportTable', 'id': selectElement.value});
+            $.ajax({
+                type: 'GET',
+                dataType: 'json',
+                url: baseUrl + api_params['url_suffix'] + '?' + (api_params['params'] || []).join('&'),
+                global: false,
+                headers: headers,
+                success: function(response){
+                    api_params = createAPICall({
+                        'endpoint': 'analytics',
+                        'pe': dhis2.report.periods[0] || 'LAST_YEAR',
+                        'ou': dhis2.report.organisationUnit.id || 'USER_ORGUNIT',
+                        'dx': response['dataDimensionItems'].map(i => i.dataElement.id)
+                    });
+                    $.ajax({
+                        type: 'GET',
+                        dataType: 'json',
+                        url: baseUrl + api_params['url_suffix'] + '?' + (api_params['params'] || []).join('&'),
+                        global: false,
+                        headers: headers,
+                        success: function(response){
+                            tableContent = extractTableContent(response);
+                            console.log(tableContent);
+                            table = document.getElementById("pivotTable");
+                            thead = table.createTHead();
+                            row = thead.insertRow();
+                            for (h of table_headers) {
+                                th = document.createElement("th");
+                                text = document.createTextNode(h);
+                                th.appendChild(text);
+                                row.appendChild(th);
+                            }
+
+                            tableContent.forEach(function(row){
+                                newRow = table.insertRow();
+                                insertCellToTable(newRow, row.period.name);
+                                insertCellToTable(newRow, row.organisationUnit.name);
+                                insertCellToTable(newRow, row.dataElement.name);
+                                insertCellToTable(newRow, row.value);
+                                insertCellToTable(newRow, row.sourceTypes.map(i => i.name).join(' / '));
+                            });
+                        },
+                        error: function(error){
+                            console.log(error)
+                        }
+                    })
+                },
+                error: function(error){
+                    console.log(error)
+                }
+            })
+        }
+        $(document).ready(function() {
+            callParams = createAPICall({'endpoint': 'reportTablesList'});
+            $.ajax({
+                type: 'GET',
+                dataType: 'json',
+                url: baseUrl + callParams['url_suffix'] + '?' + callParams['params'].join('&'),
+                global: false,
+                headers: headers,
+                success: function(response){
+                    fillPivotTableSelect(response['reportTables'])
+                },
+                error: function(error){
+                    console.log(error)
+                }
+            })
+        });
+    </script>
+</head>
+<body>
+<div id="mainDiv" class="container-fluid">
+    <div class="row">
+        <div class="col-sm-12">
+            <select id="pivotTableSelect" class="form-control" placeholder="Select Pivot table" onchange="loadTableInfo(this)">
+                <option value="">Select Pivot table</option>
+            </select>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-sm-4">
+            <h5>Additional filters</h5>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-sm-12">
+            <table id="pivotTable" class="table table-striped table-responsive table-bordered table-sm" cellspacing="0" width="100%"></table>
+        </div>
+    </div>
+</div>
+<!-- Optional JavaScript -->
+<!-- jQuery first, then Popper.js, then Bootstrap JS -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.7/umd/popper.min.js" integrity="sha384-UO2eT0CpHqdSJQ6hJty5KVphtPhzWj9WO1clHTMGa3JDZwrnQq4sF86dIHNDz0W1" crossorigin="anonymous"></script>
+<script src="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js" integrity="sha384-JjSmVgyd0p3pXB1rRibZUAYoIIy6OrQ6VrjIEaFf/nJGzIxFDsf4x0xIM+B07jRM" crossorigin="anonymous"></script>
+</body>
