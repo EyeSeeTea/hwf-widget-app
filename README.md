@@ -23,4 +23,4 @@ The desired visualization is then propagated to the HTML-based report engine and
 - *to be added* src folder for the widget app + docs
 
 ## Custom reports
-- [Extended pivot table](custom_reports/extended_pivot_table/README.md) Implementing a data table extracted directly from the existing pivot tables list and adding HWF requirements: Source type aggregation and audit.
+- [Extended pivot table](custom-reports/extended_pivot_table/README.md) Implementing a data table extracted directly from the existing pivot tables list and adding HWF requirements: Source type aggregation and audit.
